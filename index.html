@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>KBC Game</title>
+  <script>
+    let questionIndex = 0;
+
+    async function sendAnswer(userAnswer) {
+      const res = await fetch("https://<your-n8n-url>/webhook/kbc-game", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ questionIndex, userAnswer })
+      });
+      const data = await res.json();
+      document.getElementById("result").innerText = data.message;
+
+      if (!data.finished) {
+        questionIndex = data.nextIndex;
+        loadQuestion(data.nextQuestion);
+      } else {
+        document.getElementById("question").innerHTML = "Game Over!";
+        document.getElementById("options").innerHTML = "";
+      }
+    }
+
+    function loadQuestion(q) {
+      document.getElementById("question").innerText = q.question;
+      const optionsHtml = q.options.map(opt =>
+        `<button onclick="sendAnswer('${opt}')">${opt}</button>`
+      ).join("<br>");
+      document.getElementById("options").innerHTML = optionsHtml;
+    }
+
+    window.onload = () => {
+      const firstQ = {
+        question: "What is the capital of India?",
+        options: ["Mumbai", "Delhi", "Chennai", "Kolkata"]
+      };
+      loadQuestion(firstQ);
+    };
+  </script>
+</head>
+<body>
+  <h1>KBC Game</h1>
+  <div id="question"></div>
+  <div id="options"></div>
+  <p id="result"></p>
+</body>
+</html>
