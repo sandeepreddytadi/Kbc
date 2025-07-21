@@ -3,26 +3,31 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>3D AI Avatar with Motion Imitation</title>
+    <title>3D AI Avatar with VRM Motion Imitation</title>
     <!-- Three.js for 3D rendering -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
-    <!-- TensorFlow.js for ML models -->
-    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@3.13.0/dist/tf.min.js"></script>
-    <!-- PoseNet model -->
-    <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/posenet@2.2.2/dist/posenet.min.js"></script>
+    <!-- GLTFLoader for loading VRM (which is a GLTF extension) -->
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
+    <!-- three-vrm library for VRM specific functionalities -->
+    <script src="https://cdn.jsdelivr.net/npm/@pixiv/three-vrm@0.6.11/lib/three-vrm.min.js"></script>
+    <!-- MediaPipe Pose for pose estimation -->
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose@0.5.1635988162/pose.js"></script>
+    <!-- MediaPipe Camera Utils for webcam integration -->
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils@0.3.1640029074/camera_utils.js"></script>
+
     <style>
         body {
             font-family: 'Inter', sans-serif;
             display: flex;
             flex-direction: column;
-            justify-content: flex-start; /* Align to top for better layout */
+            justify-content: flex-start;
             align-items: center;
             min-height: 100vh;
             background: linear-gradient(135deg, #f0f2f5 0%, #e0e6ed 100%);
             margin: 0;
             color: #333;
-            overflow-x: hidden; /* Prevent horizontal scroll */
-            padding-top: 20px; /* Add some top padding */
+            overflow-x: hidden;
+            padding-top: 20px;
         }
 
         .container {
@@ -32,7 +37,7 @@
             box-shadow: 0 8px 30px rgba(0, 0, 0, 0.15);
             text-align: center;
             width: 90%;
-            max-width: 900px; /* Wider to accommodate video */
+            max-width: 1000px; /* Wider to accommodate video and avatar */
             margin-bottom: 20px;
             display: flex;
             flex-direction: column;
@@ -58,7 +63,7 @@
         .video-feed, .avatar-display {
             flex: 1; /* Take equal space */
             min-width: 300px; /* Minimum width for each panel */
-            max-width: 45%; /* Max width to keep them side by side */
+            max-width: 48%; /* Max width to keep them side by side */
             display: flex;
             flex-direction: column;
             align-items: center;
@@ -75,7 +80,7 @@
 
         #avatar-canvas-container {
             width: 100%;
-            height: 300px; /* Fixed height for 3D canvas */
+            height: 400px; /* Fixed height for 3D canvas */
             background-color: #e0e0e0;
             border-radius: 10px;
             overflow: hidden;
@@ -107,11 +112,11 @@
             display: flex;
             gap: 15px;
             margin-top: 10px;
-            flex-wrap: wrap; /* Allow buttons to wrap */
+            flex-wrap: wrap;
             justify-content: center;
         }
 
-        button {
+        button, input[type="file"]::file-selector-button {
             background-color: #007bff;
             color: white;
             border: none;
@@ -121,23 +126,39 @@
             font-size: 1.1em;
             transition: background-color 0.3s ease, transform 0.2s ease;
             box-shadow: 0 4px 10px rgba(0, 123, 255, 0.3);
+            margin: 5px; /* Add margin for file input button */
         }
 
-        button:hover:not(:disabled) {
+        button:hover:not(:disabled), input[type="file"]::file-selector-button:hover {
             background-color: #0056b3;
             transform: translateY(-2px);
         }
 
-        button:active:not(:disabled) {
+        button:active:not(:disabled), input[type="file"]::file-selector-button:active {
             transform: translateY(0);
             box-shadow: 0 2px 5px rgba(0, 123, 255, 0.3);
         }
 
-        button:disabled {
+        button:disabled, input[type="file"]:disabled::file-selector-button {
             background-color: #cccccc;
             cursor: not-allowed;
             box-shadow: none;
         }
+
+        input[type="file"] {
+            display: block; /* Ensure it takes its own line or is manageable */
+            margin: 10px auto; /* Center it */
+            width: fit-content; /* Adjust width to content */
+        }
+
+        input[type="file"]::file-selector-button {
+            background-color: #28a745;
+            box-shadow: 0 4px 10px rgba(40, 167, 69, 0.3);
+        }
+        input[type="file"]::file-selector-button:hover {
+            background-color: #218838;
+        }
+
 
         .output-section {
             width: 100%;
@@ -162,7 +183,7 @@
         }
 
         #loading-indicator {
-            display: none; /* Hidden by default */
+            display: none;
             margin-top: 10px;
             font-style: italic;
             color: #6c757d;
@@ -171,13 +192,13 @@
         /* Responsive adjustments */
         @media (max-width: 768px) {
             .content-area {
-                flex-direction: column; /* Stack panels vertically */
+                flex-direction: column;
             }
             .video-feed, .avatar-display {
-                max-width: 100%; /* Full width for stacked panels */
+                max-width: 100%;
             }
             #avatar-canvas-container {
-                height: 250px; /* Adjust height for smaller screens */
+                height: 300px;
             }
         }
 
@@ -188,7 +209,7 @@
             h1 {
                 font-size: 1.8em;
             }
-            button {
+            button, input[type="file"]::file-selector-button {
                 padding: 10px 15px;
                 font-size: 0.9em;
             }
@@ -197,7 +218,8 @@
 </head>
 <body>
     <div class="container">
-        <h1>Interactive AI Avatar with Motion</h1>
+        <h1>Interactive AI Avatar with VRM Motion</h1>
+        <input type="file" id="vrmUpload" accept=".vrm">
         <div class="content-area">
             <div class="video-feed">
                 <h2>Your Webcam Feed</h2>
@@ -207,13 +229,13 @@
                 <h2>AI Avatar</h2>
                 <div id="avatar-canvas-container">
                     <canvas id="avatar-canvas"></canvas>
-                    <div id="avatar-status">Initializing...</div>
+                    <div id="avatar-status">Please upload VRM and start webcam.</div>
                 </div>
             </div>
         </div>
 
         <div class="controls">
-            <button id="startWebcamBtn">Start Webcam</button>
+            <button id="startWebcamBtn" disabled>Start Webcam</button>
             <button id="listenBtn" disabled>Start Listening</button>
             <button id="stopBtn" disabled>Stop Listening</button>
         </div>
@@ -231,6 +253,7 @@
         const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
 
         document.addEventListener('DOMContentLoaded', () => {
+            const vrmUploadInput = document.getElementById('vrmUpload');
             const webcamVideo = document.getElementById('webcam-video');
             const startWebcamBtn = document.getElementById('startWebcamBtn');
             const listenBtn = document.getElementById('listenBtn');
@@ -241,77 +264,32 @@
             const loadingIndicator = document.getElementById('loading-indicator');
             const avatarCanvas = document.getElementById('avatar-canvas');
 
-            let net; // PoseNet model
-            let animationFrameId; // For PoseNet loop
-            let stream; // Webcam stream
-
-            // --- Three.js Setup for 3D Humanoid Avatar ---
+            let currentVRM = null;
             let scene, camera, renderer;
-            let head, body, leftArm, rightArm, leftLeg, rightLeg;
+            let poseNetModel; // MediaPipe Pose model
+            let cameraMediaPipe; // MediaPipe Camera utility
+            let stream; // Webcam stream
+            let avatarMixer; // For VRM animations if any
 
+            // --- Three.js Setup for VRM Avatar ---
             function init3D() {
                 // Scene
                 scene = new THREE.Scene();
-                scene.background = new THREE.Color(0xf0f0f0); // Light grey background for the canvas
+                scene.background = new THREE.Color(0xf0f0f0); // Light grey background
 
                 // Camera
                 camera = new THREE.PerspectiveCamera(75, avatarCanvas.clientWidth / avatarCanvas.clientHeight, 0.1, 1000);
-                camera.position.z = 3; // Move camera back to see the whole figure
+                camera.position.set(0, 1.2, 2.0); // Adjust camera position to better view humanoid
+                camera.lookAt(0, 0.8, 0); // Look at the center of the avatar
 
                 // Renderer
                 renderer = new THREE.WebGLRenderer({ canvas: avatarCanvas, antialias: true });
                 renderer.setSize(avatarCanvas.clientWidth, avatarCanvas.clientHeight);
                 renderer.setPixelRatio(window.devicePixelRatio);
-
-                // Create simplified humanoid parts
-                const bodyMaterial = new THREE.MeshPhongMaterial({ color: 0x007bff, emissive: 0x003366, shininess: 100 });
-                const armLegMaterial = new THREE.MeshPhongMaterial({ color: 0x6c757d, emissive: 0x333333, shininess: 80 });
-                const headMaterial = new THREE.MeshPhongMaterial({ color: 0xffe0bd, emissive: 0xccb399, shininess: 50 });
-
-                // Head
-                head = new THREE.Mesh(new THREE.SphereGeometry(0.3, 32, 32), headMaterial);
-                head.position.y = 1.0;
-                scene.add(head);
-
-                // Body
-                body = new THREE.Mesh(new THREE.CylinderGeometry(0.4, 0.6, 1.2, 32), bodyMaterial);
-                body.position.y = 0.2;
-                scene.add(body);
-
-                // Arms (using Groups to define pivot points for rotation)
-                // Left Arm
-                leftArm = new THREE.Group();
-                const leftUpperArm = new THREE.Mesh(new THREE.CylinderGeometry(0.15, 0.15, 0.6, 16), armLegMaterial);
-                leftUpperArm.position.y = -0.3; // Position relative to arm group's pivot (shoulder)
-                leftArm.add(leftUpperArm);
-                const leftLowerArm = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.12, 0.5, 16), armLegMaterial);
-                leftLowerArm.position.y = -0.6;
-                leftUpperArm.add(leftLowerArm); // Attach lower arm to upper arm
-                leftArm.position.set(-0.6, 0.7, 0); // Position arm group relative to body
-                scene.add(leftArm);
-
-                // Right Arm (similar structure)
-                rightArm = new THREE.Group();
-                const rightUpperArm = new THREE.Mesh(new THREE.CylinderGeometry(0.15, 0.15, 0.6, 16), armLegMaterial);
-                rightUpperArm.position.y = -0.3;
-                rightArm.add(rightUpperArm);
-                const rightLowerArm = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.12, 0.5, 16), armLegMaterial);
-                rightLowerArm.position.y = -0.6;
-                rightUpperArm.add(rightLowerArm);
-                rightArm.position.set(0.6, 0.7, 0);
-                scene.add(rightArm);
-
-                // Legs (simplified, attached to body)
-                leftLeg = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.2, 1.0, 16), armLegMaterial);
-                leftLeg.position.set(-0.25, -0.6, 0);
-                scene.add(leftLeg);
-
-                rightLeg = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.2, 1.0, 16), armLegMaterial);
-                rightLeg.position.set(0.25, -0.6, 0);
-                scene.add(rightLeg);
+                renderer.outputEncoding = THREE.sRGBEncoding; // Important for correct VRM colors
 
                 // Lighting
-                const ambientLight = new THREE.AmbientLight(0x404040); // Soft white light
+                const ambientLight = new THREE.AmbientLight(0xffffff, 0.6); // Soft white light
                 scene.add(ambientLight);
 
                 const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
@@ -334,10 +312,69 @@
 
             function animate3D() {
                 requestAnimationFrame(animate3D);
-                // Simple idle rotation for the whole figure
-                scene.rotation.y += 0.002;
+                if (currentVRM) {
+                    currentVRM.update(1 / 60); // Update VRM animations (e.g., blinking, idle)
+                }
+                if (avatarMixer) {
+                    avatarMixer.update(1 / 60); // Update any explicit animations
+                }
                 renderer.render(scene, camera);
             }
+
+            // --- VRM Loading ---
+            const loader = new THREE.GLTFLoader();
+            loader.register((parser) => new THREE.VRMLoaderPlugin(parser));
+
+            vrmUploadInput.addEventListener('change', (event) => {
+                const file = event.target.files[0];
+                if (!file) {
+                    avatarStatus.textContent = 'No VRM file selected.';
+                    return;
+                }
+
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                    const url = e.target.result;
+                    loader.load(url,
+                        (gltf) => {
+                            if (currentVRM) {
+                                scene.remove(currentVRM.scene); // Remove previous VRM if any
+                                currentVRM.dispose(); // Dispose resources
+                            }
+
+                            currentVRM = gltf.userData.vrm;
+                            scene.add(currentVRM.scene);
+                            currentVRM.scene.position.y = -0.8; // Adjust position to stand on ground
+                            currentVRM.scene.rotation.y = Math.PI; // Rotate to face camera
+
+                            // Optional: Call VRMUtils.rotateVRM0 for older VRM models
+                            // VRMUtils.rotateVRM0(currentVRM);
+
+                            avatarStatus.textContent = 'VRM loaded. Start webcam.';
+                            startWebcamBtn.disabled = false;
+                            console.log('VRM loaded:', currentVRM);
+
+                            // Set up animation mixer if the VRM has animations
+                            if (gltf.animations && gltf.animations.length > 0) {
+                                avatarMixer = new THREE.AnimationMixer(currentVRM.scene);
+                                const clip = gltf.animations[0]; // Use the first animation clip
+                                const action = avatarMixer.clipAction(clip);
+                                action.play();
+                            }
+
+                        },
+                        (progress) => {
+                            const percent = (progress.loaded / progress.total) * 100;
+                            avatarStatus.textContent = `Loading VRM: ${percent.toFixed(2)}%`;
+                        },
+                        (error) => {
+                            console.error('Error loading VRM:', error);
+                            avatarStatus.textContent = 'Error loading VRM file.';
+                        }
+                    );
+                };
+                reader.readAsDataURL(file);
+            });
 
             // --- Avatar State Management ---
             let currentAvatarState = 'idle';
@@ -346,46 +383,17 @@
                 currentAvatarState = state;
                 avatarStatus.textContent = state.charAt(0).toUpperCase() + state.slice(1) + '...';
 
-                // Adjust avatar colors based on state
-                const headMaterial = head.material;
-                const bodyMaterial = body.material;
-                const armLegMaterial = leftArm.children[0].material; // Assuming all arms/legs share material
-
-                switch (state) {
-                    case 'listening':
-                        headMaterial.color.setHex(0xffc107); // Yellow
-                        bodyMaterial.color.setHex(0xffc107);
-                        armLegMaterial.color.setHex(0xffc107);
-                        break;
-                    case 'processing':
-                        headMaterial.color.setHex(0x6c757d); // Grey
-                        bodyMaterial.color.setHex(0x6c757d);
-                        armLegMaterial.color.setHex(0x6c757d);
-                        break;
-                    case 'speaking':
-                        headMaterial.color.setHex(0x28a745); // Green
-                        bodyMaterial.color.setHex(0x28a745);
-                        armLegMaterial.color.setHex(0x28a745);
-                        // Simple pulsating effect for speaking (on body)
-                        body.scale.set(1 + Math.sin(Date.now() * 0.005) * 0.05, 1 + Math.sin(Date.now() * 0.005) * 0.05, 1 + Math.sin(Date.now() * 0.005) * 0.05);
-                        break;
-                    case 'error':
-                        headMaterial.color.setHex(0xdc3545); // Red
-                        bodyMaterial.color.setHex(0xdc3545);
-                        armLegMaterial.color.setHex(0xdc3545);
-                        break;
-                    case 'idle':
-                    default:
-                        headMaterial.color.setHex(0xffe0bd); // Default skin color
-                        bodyMaterial.color.setHex(0x007bff); // Default body color
-                        armLegMaterial.color.setHex(0x6c757d); // Default arm/leg color
-                        body.scale.set(1, 1, 1); // Reset body scale
-                        break;
-                }
+                // You could add visual cues to the VRM here if desired,
+                // e.g., changing emissive color or playing specific animations.
+                // For simplicity, we'll just update the status text.
             }
 
-            // --- Webcam and PoseNet Setup ---
+            // --- Webcam and MediaPipe Pose Setup ---
             startWebcamBtn.addEventListener('click', async () => {
+                if (!currentVRM) {
+                    alert('Please upload a VRM avatar first!');
+                    return;
+                }
                 try {
                     stream = await navigator.mediaDevices.getUserMedia({ video: true });
                     webcamVideo.srcObject = stream;
@@ -394,64 +402,251 @@
                     listenBtn.disabled = false;
                     avatarStatus.textContent = "Webcam Ready. Loading AI...";
 
-                    // Load PoseNet model
-                    net = await posenet.load({
-                        architecture: 'MobileNetV1',
-                        outputStride: 16,
-                        inputResolution: { width: 640, height: 480 },
-                        multiplier: 0.75
+                    // Initialize MediaPipe Pose
+                    poseNetModel = new Pose({
+                        locateFile: (file) => {
+                            return `https://cdn.jsdelivr.net/npm/@mediapipe/pose@0.5.1635988162/${file}`;
+                        }
                     });
+
+                    poseNetModel.setOptions({
+                        modelComplexity: 1, // 0, 1, or 2. Higher is more accurate but slower.
+                        smoothLandmarks: true,
+                        enableSegmentation: false,
+                        minDetectionConfidence: 0.5,
+                        minTrackingConfidence: 0.5
+                    });
+
+                    poseNetModel.onResults(onPoseResults);
+
+                    // Initialize MediaPipe Camera
+                    cameraMediaPipe = new Camera(webcamVideo, {
+                        onFrame: async () => {
+                            await poseNetModel.send({ image: webcamVideo });
+                        },
+                        width: webcamVideo.videoWidth,
+                        height: webcamVideo.videoHeight
+                    });
+                    await cameraMediaPipe.start();
+
                     avatarStatus.textContent = "AI Ready. Click Listen.";
-                    detectPoseInRealTime(); // Start pose detection
                 } catch (err) {
-                    console.error("Error accessing webcam or loading PoseNet:", err);
+                    console.error("Error accessing webcam or loading MediaPipe Pose:", err);
                     avatarStatus.textContent = "Error: Webcam or AI failed.";
-                    alert("Could not start webcam or load AI. Please ensure camera access is granted.");
+                    alert("Could not start webcam or load AI. Please ensure camera access is granted and try again.");
                 }
             });
 
-            async function detectPoseInRealTime() {
-                async function poseDetectionFrame() {
-                    if (webcamVideo.readyState === webcamVideo.HAVE_ENOUGH_DATA && net) {
-                        const pose = await net.estimateSinglePose(webcamVideo, {
-                            flipHorizontal: true, // Since video is mirrored
-                            decodingMethod: 'single-person'
-                        });
-                        if (pose) {
-                            mimicPose(pose);
-                        }
-                    }
-                    animationFrameId = requestAnimationFrame(poseDetectionFrame);
-                }
-                poseDetectionFrame();
-            }
-
-            function mimicPose(pose) {
-                // Simplified imitation logic for arm lifting
-                const leftWrist = pose.keypoints.find(kp => kp.part === 'leftWrist');
-                const rightWrist = pose.keypoints.find(kp => kp.part === 'rightWrist');
-                const leftShoulder = pose.keypoints.find(kp => kp.part === 'leftShoulder');
-                const rightShoulder = pose.keypoints.find(kp => kp.part === 'rightShoulder');
-
-                const threshold = -50; // Y-coordinate threshold relative to shoulder for "lifted"
-
-                if (leftWrist && leftShoulder && leftWrist.score > 0.5 && leftShoulder.score > 0.5) {
-                    // If left wrist is significantly above left shoulder (lower Y value means higher on screen)
-                    if (leftWrist.position.y < leftShoulder.position.y + threshold) {
-                        leftArm.rotation.x = -Math.PI / 2; // Rotate arm up
-                    } else {
-                        leftArm.rotation.x = 0; // Reset arm
-                    }
+            function onPoseResults(results) {
+                if (!currentVRM || !results.poseWorldLandmarks) {
+                    return;
                 }
 
-                if (rightWrist && rightShoulder && rightWrist.score > 0.5 && rightShoulder.score > 0.5) {
-                    // If right wrist is significantly above right shoulder
-                    if (rightWrist.position.y < rightShoulder.position.y + threshold) {
-                        rightArm.rotation.x = -Math.PI / 2; // Rotate arm up
-                    } else {
-                        rightArm.rotation.x = 0; // Reset arm
+                // Get the VRM's humanoid bone structure
+                const humanoid = currentVRM.humanoid;
+
+                // --- Map MediaPipe Pose to VRM Bones ---
+                // MediaPipe landmarks are normalized 3D coordinates (x, y, z where z is depth)
+                // worldLandmarks are in meters, relative to the center of the hips.
+
+                // A helper function to get a bone by its standardized name
+                const getBone = (name) => humanoid.getBoneNode(name);
+
+                // Function to calculate rotation from two vectors
+                function getQuaternionFromVectors(v1, v2) {
+                    const quaternion = new THREE.Quaternion();
+                    const axis = new THREE.Vector3().crossVectors(v1, v2).normalize();
+                    const angle = Math.acos(v1.dot(v2));
+                    quaternion.setFromAxisAngle(axis, angle);
+                    return quaternion;
+                }
+
+                // IMPORTANT: MediaPipe's coordinate system (X right, Y down, Z into screen)
+                // needs to be converted to Three.js's (X right, Y up, Z out of screen)
+                // and then adjusted for VRM's T-pose orientation.
+                // This is a simplified mapping. A full IK solution is more robust.
+
+                // Use worldLandmarks for more accurate 3D positions
+                const landmarks = results.poseWorldLandmarks;
+
+                // Define MediaPipe landmark indices for easier access
+                const LM = {
+                    NOSE: 0, LEFT_EYE_INNER: 1, LEFT_EYE: 2, LEFT_EYE_OUTER: 3, RIGHT_EYE_INNER: 4, RIGHT_EYE: 5, RIGHT_EYE_OUTER: 6,
+                    LEFT_EAR: 7, RIGHT_EAR: 8, MOUTH_LEFT: 9, MOUTH_RIGHT: 10,
+                    LEFT_SHOULDER: 11, RIGHT_SHOULDER: 12, LEFT_ELBOW: 13, RIGHT_ELBOW: 14,
+                    LEFT_WRIST: 15, RIGHT_WRIST: 16, LEFT_PINKY: 17, RIGHT_PINKY: 18,
+                    LEFT_INDEX: 19, RIGHT_INDEX: 20, LEFT_THUMB: 21, RIGHT_THUMB: 22,
+                    LEFT_HIP: 23, RIGHT_HIP: 24, LEFT_KNEE: 25, RIGHT_KNEE: 26,
+                    LEFT_ANKLE: 27, RIGHT_ANKLE: 28, LEFT_HEEL: 29, RIGHT_HEEL: 30, LEFT_FOOT_INDEX: 31, RIGHT_FOOT_INDEX: 32
+                };
+
+                // Helper to get a landmark as a THREE.Vector3
+                const getLandmark = (idx) => {
+                    const lm = landmarks[idx];
+                    // Convert MediaPipe coords (x,y,z) to Three.js coords (x, -y, -z)
+                    // And scale to match VRM model scale (adjust this based on your VRM)
+                    return new THREE.Vector3(lm.x, -lm.y, -lm.z).multiplyScalar(1); // Scale factor might need adjustment
+                };
+
+                // --- Head Rotation ---
+                const nose = getLandmark(LM.NOSE);
+                const leftEar = getLandmark(LM.LEFT_EAR);
+                const rightEar = getLandmark(LM.RIGHT_EAR);
+
+                if (nose && leftEar && rightEar) {
+                    const headBone = getBone('head');
+                    if (headBone) {
+                        // Calculate head direction vector
+                        const headCenter = new THREE.Vector3().addVectors(leftEar, rightEar).multiplyScalar(0.5);
+                        const headForward = new THREE.Vector3().subVectors(nose, headCenter).normalize();
+
+                        // Assuming initial head forward is +Z (or -Z depending on VRM orientation)
+                        const initialForward = new THREE.Vector3(0, 0, 1); // Or (0,0,-1)
+                        const targetQuaternion = new THREE.Quaternion().setFromUnitVectors(initialForward, headForward);
+
+                        // Apply rotation. VRM bones might have initial rotations.
+                        // This is a simplified direct application.
+                        headBone.quaternion.copy(targetQuaternion);
                     }
                 }
+
+                // --- Arm Rotations ---
+                const leftShoulder = getLandmark(LM.LEFT_SHOULDER);
+                const leftElbow = getLandmark(LM.LEFT_ELBOW);
+                const leftWrist = getLandmark(LM.LEFT_WRIST);
+
+                if (leftShoulder && leftElbow && leftWrist) {
+                    const upperArmBone = getBone('leftUpperArm');
+                    const lowerArmBone = getBone('leftLowerArm');
+
+                    if (upperArmBone && lowerArmBone) {
+                        const shoulderToElbow = new THREE.Vector3().subVectors(leftElbow, leftShoulder).normalize();
+                        const elbowToWrist = new THREE.Vector3().subVectors(leftWrist, leftElbow).normalize();
+
+                        // Rotate upper arm
+                        // Assuming initial arm direction is along Y-axis downwards for VRM T-pose
+                        const initialUpperArmDir = new THREE.Vector3(0, -1, 0);
+                        upperArmBone.quaternion.setFromUnitVectors(initialUpperArmDir, shoulderToElbow);
+
+                        // Rotate lower arm relative to upper arm
+                        // This is more complex and usually involves calculating the angle between planes
+                        // For simplicity, we'll try to align it relative to its parent's new orientation
+                        const initialLowerArmDir = new THREE.Vector3(0, -1, 0); // Relative to upper arm
+                        lowerArmBone.quaternion.setFromUnitVectors(initialLowerArmDir, elbowToWrist);
+                    }
+                }
+
+                // Repeat for Right Arm
+                const rightShoulder = getLandmark(LM.RIGHT_SHOULDER);
+                const rightElbow = getLandmark(LM.RIGHT_ELBOW);
+                const rightWrist = getLandmark(LM.RIGHT_WRIST);
+
+                if (rightShoulder && rightElbow && rightWrist) {
+                    const upperArmBone = getBone('rightUpperArm');
+                    const lowerArmBone = getBone('rightLowerArm');
+
+                    if (upperArmBone && lowerArmBone) {
+                        const shoulderToElbow = new THREE.Vector3().subVectors(rightElbow, rightShoulder).normalize();
+                        const elbowToWrist = new THREE.Vector3().subVectors(rightWrist, rightElbow).normalize();
+
+                        const initialUpperArmDir = new THREE.Vector3(0, -1, 0); // Assuming initial arm direction
+                        upperArmBone.quaternion.setFromUnitVectors(initialUpperArmDir, shoulderToElbow);
+
+                        const initialLowerArmDir = new THREE.Vector3(0, -1, 0);
+                        lowerArmBone.quaternion.setFromUnitVectors(initialLowerArmDir, elbowToWrist);
+                    }
+                }
+
+                // --- Leg Rotations (Simplified) ---
+                const leftHip = getLandmark(LM.LEFT_HIP);
+                const leftKnee = getLandmark(LM.LEFT_KNEE);
+                const leftAnkle = getLandmark(LM.LEFT_ANKLE);
+
+                if (leftHip && leftKnee && leftAnkle) {
+                    const upperLegBone = getBone('leftUpperLeg');
+                    const lowerLegBone = getBone('leftLowerLeg');
+
+                    if (upperLegBone && lowerLegBone) {
+                        const hipToKnee = new THREE.Vector3().subVectors(leftKnee, leftHip).normalize();
+                        const kneeToAnkle = new THREE.Vector3().subVectors(leftAnkle, leftKnee).normalize();
+
+                        const initialUpperLegDir = new THREE.Vector3(0, -1, 0);
+                        upperLegBone.quaternion.setFromUnitVectors(initialUpperLegDir, hipToKnee);
+
+                        const initialLowerLegDir = new THREE.Vector3(0, -1, 0);
+                        lowerLegBone.quaternion.setFromUnitVectors(initialLowerLegDir, kneeToAnkle);
+                    }
+                }
+
+                // Repeat for Right Leg
+                const rightHip = getLandmark(LM.RIGHT_HIP);
+                const rightKnee = getLandmark(LM.RIGHT_KNEE);
+                const rightAnkle = getLandmark(LM.RIGHT_ANKLE);
+
+                if (rightHip && rightKnee && rightAnkle) {
+                    const upperLegBone = getBone('rightUpperLeg');
+                    const lowerLegBone = getBone('rightLowerLeg');
+
+                    if (upperLegBone && lowerLegBone) {
+                        const hipToKnee = new THREE.Vector3().subVectors(rightKnee, rightHip).normalize();
+                        const kneeToAnkle = new THREE.Vector3().subVectors(rightAnkle, rightKnee).normalize();
+
+                        const initialUpperLegDir = new THREE.Vector3(0, -1, 0);
+                        upperLegBone.quaternion.setFromUnitVectors(initialUpperLegDir, hipToKnee);
+
+                        const initialLowerLegDir = new THREE.Vector3(0, -1, 0);
+                        lowerLegBone.quaternion.setFromUnitVectors(initialLowerLegDir, kneeToAnkle);
+                    }
+                }
+
+                // --- Face/Head Tracking (Simplified) ---
+                // MediaPipe Pose also gives head landmarks like nose, eyes, ears.
+                // You can use these to derive head rotation.
+                // For example, using the difference between left and right ear/eye for head roll,
+                // and nose position relative to shoulders for pitch/yaw.
+                // This is a very basic example:
+                const leftEye = getLandmark(LM.LEFT_EYE);
+                const rightEye = getLandmark(LM.RIGHT_EYE);
+                const headBone = getBone('head');
+
+                if (leftEye && rightEye && headBone) {
+                    const eyeCenter = new THREE.Vector3().addVectors(leftEye, rightEye).multiplyScalar(0.5);
+                    const shoulderCenter = new THREE.Vector3().addVectors(leftShoulder, rightShoulder).multiplyScalar(0.5);
+
+                    // Calculate a rough "up" vector for the head
+                    const headUp = new THREE.Vector3(0, 1, 0); // Assuming head is generally upright
+
+                    // Calculate a rough "forward" vector for the head based on nose relative to eye center
+                    const headForward = new THREE.Vector3().subVectors(nose, eyeCenter).normalize();
+
+                    // Create a rotation that aligns the head's local forward (usually Z) with the detected forward
+                    // And its local up (usually Y) with the detected up.
+                    // This requires more advanced matrix operations or a dedicated look-at function.
+                    // For a simple demonstration, we can try to apply yaw (side-to-side) and pitch (up-down)
+                    // based on relative positions.
+
+                    // Yaw (left/right head turn)
+                    const headYaw = Math.atan2(headForward.x, headForward.z);
+                    // Pitch (up/down head tilt) - simplified
+                    const headPitch = Math.atan2(headForward.y, Math.sqrt(headForward.x * headForward.x + headForward.z * headForward.z));
+
+                    // Apply to head bone (assuming head's default forward is +Z and up is +Y)
+                    // You might need to adjust the axis and direction based on your VRM's bone orientation
+                    headBone.rotation.y = headYaw;
+                    headBone.rotation.x = -headPitch; // Negative for typical head pitch
+                }
+
+                // You can also access facial blend shapes for VRM if you have face landmarks
+                // and a way to map them to blend shape values. This is highly complex.
+                // For example:
+                // if (currentVRM.blendShapeProxy && results.faceLandmarks) {
+                //     // Map faceLandmarks to blendShapeProxy values (e.g., 'A', 'I', 'U', 'E', 'O')
+                //     // This requires a custom mapping logic.
+                //     currentVRM.blendShapeProxy.setValue('A', 0.5); // Example
+                //     currentVRM.blendShapeProxy.update();
+                // }
+
+                currentVRM.humanoid.update(); // Update the VRM humanoid rig
             }
 
 
@@ -463,7 +658,6 @@
                 avatarStatus.textContent = "Browser not supported for voice. Use Chrome.";
                 listenBtn.disabled = true;
                 console.error("Web Speech API not supported in this browser.");
-                // Do not return here, as 3D and motion might still work
             } else {
                 const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
                 recognition = new SpeechRecognition();
@@ -599,7 +793,7 @@
             // Initialize 3D scene when window loads
             window.onload = function() {
                 init3D();
-                setAvatarState('idle'); // Set initial state after 3D is ready
+                setAvatarState('idle');
             };
         });
     </script>
