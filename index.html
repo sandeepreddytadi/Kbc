@@ -1,49 +1,607 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-  <title>KBC Game</title>
-  <script>
-    let questionIndex = 0;
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>3D AI Avatar with Motion Imitation</title>
+    <!-- Three.js for 3D rendering -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <!-- TensorFlow.js for ML models -->
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@3.13.0/dist/tf.min.js"></script>
+    <!-- PoseNet model -->
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/posenet@2.2.2/dist/posenet.min.js"></script>
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            display: flex;
+            flex-direction: column;
+            justify-content: flex-start; /* Align to top for better layout */
+            align-items: center;
+            min-height: 100vh;
+            background: linear-gradient(135deg, #f0f2f5 0%, #e0e6ed 100%);
+            margin: 0;
+            color: #333;
+            overflow-x: hidden; /* Prevent horizontal scroll */
+            padding-top: 20px; /* Add some top padding */
+        }
 
-    async function sendAnswer(userAnswer) {
-      const res = await fetch("https://<your-n8n-url>/webhook/kbc-game", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ questionIndex, userAnswer })
-      });
-      const data = await res.json();
-      document.getElementById("result").innerText = data.message;
+        .container {
+            background-color: #fff;
+            padding: 30px;
+            border-radius: 15px;
+            box-shadow: 0 8px 30px rgba(0, 0, 0, 0.15);
+            text-align: center;
+            width: 90%;
+            max-width: 900px; /* Wider to accommodate video */
+            margin-bottom: 20px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 20px;
+        }
 
-      if (!data.finished) {
-        questionIndex = data.nextIndex;
-        loadQuestion(data.nextQuestion);
-      } else {
-        document.getElementById("question").innerHTML = "Game Over!";
-        document.getElementById("options").innerHTML = "";
-      }
-    }
+        h1 {
+            color: #007bff;
+            margin-bottom: 15px;
+            font-size: 2.2em;
+        }
 
-    function loadQuestion(q) {
-      document.getElementById("question").innerText = q.question;
-      const optionsHtml = q.options.map(opt =>
-        `<button onclick="sendAnswer('${opt}')">${opt}</button>`
-      ).join("<br>");
-      document.getElementById("options").innerHTML = optionsHtml;
-    }
+        .content-area {
+            display: flex;
+            flex-direction: row; /* Side-by-side layout */
+            gap: 20px;
+            width: 100%;
+            justify-content: center;
+            flex-wrap: wrap; /* Allow wrapping on smaller screens */
+        }
 
-    window.onload = () => {
-      const firstQ = {
-        question: "What is the capital of India?",
-        options: ["Mumbai", "Delhi", "Chennai", "Kolkata"]
-      };
-      loadQuestion(firstQ);
-    };
-  </script>
+        .video-feed, .avatar-display {
+            flex: 1; /* Take equal space */
+            min-width: 300px; /* Minimum width for each panel */
+            max-width: 45%; /* Max width to keep them side by side */
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 10px;
+        }
+
+        #webcam-video {
+            width: 100%;
+            height: auto;
+            border-radius: 10px;
+            background-color: #000;
+            transform: scaleX(-1); /* Mirror effect for selfie view */
+        }
+
+        #avatar-canvas-container {
+            width: 100%;
+            height: 300px; /* Fixed height for 3D canvas */
+            background-color: #e0e0e0;
+            border-radius: 10px;
+            overflow: hidden;
+            position: relative;
+            box-shadow: inset 0 0 15px rgba(0, 0, 0, 0.1);
+        }
+
+        #avatar-canvas {
+            display: block;
+            width: 100%;
+            height: 100%;
+            border-radius: 10px;
+        }
+
+        #avatar-status {
+            position: absolute;
+            bottom: 10px;
+            left: 50%;
+            transform: translateX(-50%);
+            background-color: rgba(0, 0, 0, 0.6);
+            color: white;
+            padding: 5px 10px;
+            border-radius: 5px;
+            font-size: 0.9em;
+            z-index: 10;
+        }
+
+        .controls {
+            display: flex;
+            gap: 15px;
+            margin-top: 10px;
+            flex-wrap: wrap; /* Allow buttons to wrap */
+            justify-content: center;
+        }
+
+        button {
+            background-color: #007bff;
+            color: white;
+            border: none;
+            padding: 12px 25px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 1.1em;
+            transition: background-color 0.3s ease, transform 0.2s ease;
+            box-shadow: 0 4px 10px rgba(0, 123, 255, 0.3);
+        }
+
+        button:hover:not(:disabled) {
+            background-color: #0056b3;
+            transform: translateY(-2px);
+        }
+
+        button:active:not(:disabled) {
+            transform: translateY(0);
+            box-shadow: 0 2px 5px rgba(0, 123, 255, 0.3);
+        }
+
+        button:disabled {
+            background-color: #cccccc;
+            cursor: not-allowed;
+            box-shadow: none;
+        }
+
+        .output-section {
+            width: 100%;
+            text-align: left;
+            padding: 10px 0;
+            border-top: 1px solid #eee;
+            margin-top: 15px;
+        }
+
+        .output-section p {
+            margin: 8px 0;
+            font-size: 1.05em;
+        }
+
+        .output-section strong {
+            color: #555;
+        }
+
+        #user-input, #avatar-reply {
+            font-weight: bold;
+            color: #28a745;
+        }
+
+        #loading-indicator {
+            display: none; /* Hidden by default */
+            margin-top: 10px;
+            font-style: italic;
+            color: #6c757d;
+        }
+
+        /* Responsive adjustments */
+        @media (max-width: 768px) {
+            .content-area {
+                flex-direction: column; /* Stack panels vertically */
+            }
+            .video-feed, .avatar-display {
+                max-width: 100%; /* Full width for stacked panels */
+            }
+            #avatar-canvas-container {
+                height: 250px; /* Adjust height for smaller screens */
+            }
+        }
+
+        @media (max-width: 480px) {
+            .container {
+                padding: 15px;
+            }
+            h1 {
+                font-size: 1.8em;
+            }
+            button {
+                padding: 10px 15px;
+                font-size: 0.9em;
+            }
+        }
+    </style>
 </head>
 <body>
-  <h1>KBC Game</h1>
-  <div id="question"></div>
-  <div id="options"></div>
-  <p id="result"></p>
+    <div class="container">
+        <h1>Interactive AI Avatar with Motion</h1>
+        <div class="content-area">
+            <div class="video-feed">
+                <h2>Your Webcam Feed</h2>
+                <video id="webcam-video" autoplay playsinline></video>
+            </div>
+            <div class="avatar-display">
+                <h2>AI Avatar</h2>
+                <div id="avatar-canvas-container">
+                    <canvas id="avatar-canvas"></canvas>
+                    <div id="avatar-status">Initializing...</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="controls">
+            <button id="startWebcamBtn">Start Webcam</button>
+            <button id="listenBtn" disabled>Start Listening</button>
+            <button id="stopBtn" disabled>Stop Listening</button>
+        </div>
+        <div id="loading-indicator">Thinking...</div>
+        <div class="output-section">
+            <p><strong>You said:</strong> <span id="user-input"></span></p>
+            <p><strong>Avatar says:</strong> <span id="avatar-reply"></span></p>
+        </div>
+    </div>
+
+    <script>
+        // Global variables for Firebase configuration (provided by the environment)
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+        const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {};
+        const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+
+        document.addEventListener('DOMContentLoaded', () => {
+            const webcamVideo = document.getElementById('webcam-video');
+            const startWebcamBtn = document.getElementById('startWebcamBtn');
+            const listenBtn = document.getElementById('listenBtn');
+            const stopBtn = document.getElementById('stopBtn');
+            const userInputSpan = document.getElementById('user-input');
+            const avatarReplySpan = document.getElementById('avatar-reply');
+            const avatarStatus = document.getElementById('avatar-status');
+            const loadingIndicator = document.getElementById('loading-indicator');
+            const avatarCanvas = document.getElementById('avatar-canvas');
+
+            let net; // PoseNet model
+            let animationFrameId; // For PoseNet loop
+            let stream; // Webcam stream
+
+            // --- Three.js Setup for 3D Humanoid Avatar ---
+            let scene, camera, renderer;
+            let head, body, leftArm, rightArm, leftLeg, rightLeg;
+
+            function init3D() {
+                // Scene
+                scene = new THREE.Scene();
+                scene.background = new THREE.Color(0xf0f0f0); // Light grey background for the canvas
+
+                // Camera
+                camera = new THREE.PerspectiveCamera(75, avatarCanvas.clientWidth / avatarCanvas.clientHeight, 0.1, 1000);
+                camera.position.z = 3; // Move camera back to see the whole figure
+
+                // Renderer
+                renderer = new THREE.WebGLRenderer({ canvas: avatarCanvas, antialias: true });
+                renderer.setSize(avatarCanvas.clientWidth, avatarCanvas.clientHeight);
+                renderer.setPixelRatio(window.devicePixelRatio);
+
+                // Create simplified humanoid parts
+                const bodyMaterial = new THREE.MeshPhongMaterial({ color: 0x007bff, emissive: 0x003366, shininess: 100 });
+                const armLegMaterial = new THREE.MeshPhongMaterial({ color: 0x6c757d, emissive: 0x333333, shininess: 80 });
+                const headMaterial = new THREE.MeshPhongMaterial({ color: 0xffe0bd, emissive: 0xccb399, shininess: 50 });
+
+                // Head
+                head = new THREE.Mesh(new THREE.SphereGeometry(0.3, 32, 32), headMaterial);
+                head.position.y = 1.0;
+                scene.add(head);
+
+                // Body
+                body = new THREE.Mesh(new THREE.CylinderGeometry(0.4, 0.6, 1.2, 32), bodyMaterial);
+                body.position.y = 0.2;
+                scene.add(body);
+
+                // Arms (using Groups to define pivot points for rotation)
+                // Left Arm
+                leftArm = new THREE.Group();
+                const leftUpperArm = new THREE.Mesh(new THREE.CylinderGeometry(0.15, 0.15, 0.6, 16), armLegMaterial);
+                leftUpperArm.position.y = -0.3; // Position relative to arm group's pivot (shoulder)
+                leftArm.add(leftUpperArm);
+                const leftLowerArm = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.12, 0.5, 16), armLegMaterial);
+                leftLowerArm.position.y = -0.6;
+                leftUpperArm.add(leftLowerArm); // Attach lower arm to upper arm
+                leftArm.position.set(-0.6, 0.7, 0); // Position arm group relative to body
+                scene.add(leftArm);
+
+                // Right Arm (similar structure)
+                rightArm = new THREE.Group();
+                const rightUpperArm = new THREE.Mesh(new THREE.CylinderGeometry(0.15, 0.15, 0.6, 16), armLegMaterial);
+                rightUpperArm.position.y = -0.3;
+                rightArm.add(rightUpperArm);
+                const rightLowerArm = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.12, 0.5, 16), armLegMaterial);
+                rightLowerArm.position.y = -0.6;
+                rightUpperArm.add(rightLowerArm);
+                rightArm.position.set(0.6, 0.7, 0);
+                scene.add(rightArm);
+
+                // Legs (simplified, attached to body)
+                leftLeg = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.2, 1.0, 16), armLegMaterial);
+                leftLeg.position.set(-0.25, -0.6, 0);
+                scene.add(leftLeg);
+
+                rightLeg = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.2, 1.0, 16), armLegMaterial);
+                rightLeg.position.set(0.25, -0.6, 0);
+                scene.add(rightLeg);
+
+                // Lighting
+                const ambientLight = new THREE.AmbientLight(0x404040); // Soft white light
+                scene.add(ambientLight);
+
+                const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
+                directionalLight.position.set(1, 1, 1).normalize();
+                scene.add(directionalLight);
+
+                // Handle window resize
+                window.addEventListener('resize', onWindowResize, false);
+                onWindowResize(); // Initial call to set correct size
+
+                animate3D(); // Start the 3D animation loop
+            }
+
+            function onWindowResize() {
+                const container = document.getElementById('avatar-canvas-container');
+                renderer.setSize(container.clientWidth, container.clientHeight);
+                camera.aspect = container.clientWidth / container.clientHeight;
+                camera.updateProjectionMatrix();
+            }
+
+            function animate3D() {
+                requestAnimationFrame(animate3D);
+                // Simple idle rotation for the whole figure
+                scene.rotation.y += 0.002;
+                renderer.render(scene, camera);
+            }
+
+            // --- Avatar State Management ---
+            let currentAvatarState = 'idle';
+
+            function setAvatarState(state) {
+                currentAvatarState = state;
+                avatarStatus.textContent = state.charAt(0).toUpperCase() + state.slice(1) + '...';
+
+                // Adjust avatar colors based on state
+                const headMaterial = head.material;
+                const bodyMaterial = body.material;
+                const armLegMaterial = leftArm.children[0].material; // Assuming all arms/legs share material
+
+                switch (state) {
+                    case 'listening':
+                        headMaterial.color.setHex(0xffc107); // Yellow
+                        bodyMaterial.color.setHex(0xffc107);
+                        armLegMaterial.color.setHex(0xffc107);
+                        break;
+                    case 'processing':
+                        headMaterial.color.setHex(0x6c757d); // Grey
+                        bodyMaterial.color.setHex(0x6c757d);
+                        armLegMaterial.color.setHex(0x6c757d);
+                        break;
+                    case 'speaking':
+                        headMaterial.color.setHex(0x28a745); // Green
+                        bodyMaterial.color.setHex(0x28a745);
+                        armLegMaterial.color.setHex(0x28a745);
+                        // Simple pulsating effect for speaking (on body)
+                        body.scale.set(1 + Math.sin(Date.now() * 0.005) * 0.05, 1 + Math.sin(Date.now() * 0.005) * 0.05, 1 + Math.sin(Date.now() * 0.005) * 0.05);
+                        break;
+                    case 'error':
+                        headMaterial.color.setHex(0xdc3545); // Red
+                        bodyMaterial.color.setHex(0xdc3545);
+                        armLegMaterial.color.setHex(0xdc3545);
+                        break;
+                    case 'idle':
+                    default:
+                        headMaterial.color.setHex(0xffe0bd); // Default skin color
+                        bodyMaterial.color.setHex(0x007bff); // Default body color
+                        armLegMaterial.color.setHex(0x6c757d); // Default arm/leg color
+                        body.scale.set(1, 1, 1); // Reset body scale
+                        break;
+                }
+            }
+
+            // --- Webcam and PoseNet Setup ---
+            startWebcamBtn.addEventListener('click', async () => {
+                try {
+                    stream = await navigator.mediaDevices.getUserMedia({ video: true });
+                    webcamVideo.srcObject = stream;
+                    await webcamVideo.play();
+                    startWebcamBtn.disabled = true;
+                    listenBtn.disabled = false;
+                    avatarStatus.textContent = "Webcam Ready. Loading AI...";
+
+                    // Load PoseNet model
+                    net = await posenet.load({
+                        architecture: 'MobileNetV1',
+                        outputStride: 16,
+                        inputResolution: { width: 640, height: 480 },
+                        multiplier: 0.75
+                    });
+                    avatarStatus.textContent = "AI Ready. Click Listen.";
+                    detectPoseInRealTime(); // Start pose detection
+                } catch (err) {
+                    console.error("Error accessing webcam or loading PoseNet:", err);
+                    avatarStatus.textContent = "Error: Webcam or AI failed.";
+                    alert("Could not start webcam or load AI. Please ensure camera access is granted.");
+                }
+            });
+
+            async function detectPoseInRealTime() {
+                async function poseDetectionFrame() {
+                    if (webcamVideo.readyState === webcamVideo.HAVE_ENOUGH_DATA && net) {
+                        const pose = await net.estimateSinglePose(webcamVideo, {
+                            flipHorizontal: true, // Since video is mirrored
+                            decodingMethod: 'single-person'
+                        });
+                        if (pose) {
+                            mimicPose(pose);
+                        }
+                    }
+                    animationFrameId = requestAnimationFrame(poseDetectionFrame);
+                }
+                poseDetectionFrame();
+            }
+
+            function mimicPose(pose) {
+                // Simplified imitation logic for arm lifting
+                const leftWrist = pose.keypoints.find(kp => kp.part === 'leftWrist');
+                const rightWrist = pose.keypoints.find(kp => kp.part === 'rightWrist');
+                const leftShoulder = pose.keypoints.find(kp => kp.part === 'leftShoulder');
+                const rightShoulder = pose.keypoints.find(kp => kp.part === 'rightShoulder');
+
+                const threshold = -50; // Y-coordinate threshold relative to shoulder for "lifted"
+
+                if (leftWrist && leftShoulder && leftWrist.score > 0.5 && leftShoulder.score > 0.5) {
+                    // If left wrist is significantly above left shoulder (lower Y value means higher on screen)
+                    if (leftWrist.position.y < leftShoulder.position.y + threshold) {
+                        leftArm.rotation.x = -Math.PI / 2; // Rotate arm up
+                    } else {
+                        leftArm.rotation.x = 0; // Reset arm
+                    }
+                }
+
+                if (rightWrist && rightShoulder && rightWrist.score > 0.5 && rightShoulder.score > 0.5) {
+                    // If right wrist is significantly above right shoulder
+                    if (rightWrist.position.y < rightShoulder.position.y + threshold) {
+                        rightArm.rotation.x = -Math.PI / 2; // Rotate arm up
+                    } else {
+                        rightArm.rotation.x = 0; // Reset arm
+                    }
+                }
+            }
+
+
+            // --- Speech Recognition Setup ---
+            let recognition;
+            const synth = window.speechSynthesis;
+
+            if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
+                avatarStatus.textContent = "Browser not supported for voice. Use Chrome.";
+                listenBtn.disabled = true;
+                console.error("Web Speech API not supported in this browser.");
+                // Do not return here, as 3D and motion might still work
+            } else {
+                const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+                recognition = new SpeechRecognition();
+                recognition.continuous = false;
+                recognition.lang = 'en-US';
+                recognition.interimResults = false;
+                recognition.maxAlternatives = 1;
+
+                // --- Event Listeners for Voice Buttons ---
+                listenBtn.addEventListener('click', () => {
+                    userInputSpan.textContent = '';
+                    avatarReplySpan.textContent = '';
+                    loadingIndicator.style.display = 'none';
+                    setAvatarState('listening');
+                    listenBtn.disabled = true;
+                    stopBtn.disabled = false;
+                    recognition.start();
+                });
+
+                stopBtn.addEventListener('click', () => {
+                    recognition.stop();
+                    setAvatarState('idle');
+                    listenBtn.disabled = false;
+                    stopBtn.disabled = true;
+                });
+
+                // --- Speech Recognition Callbacks ---
+                recognition.onstart = () => {
+                    console.log('Voice recognition started.');
+                };
+
+                recognition.onresult = (event) => {
+                    const transcript = event.results[0][0].transcript;
+                    userInputSpan.textContent = transcript;
+                    console.log('You said:', transcript);
+                    setAvatarState('processing');
+                    loadingIndicator.style.display = 'block';
+                    processUserInputWithAI(transcript);
+                };
+
+                recognition.onerror = (event) => {
+                    console.error('Speech recognition error:', event.error);
+                    avatarReplySpan.textContent = 'Sorry, I missed that. Can you please repeat?';
+                    speak(avatarReplySpan.textContent);
+                    setAvatarState('error');
+                    loadingIndicator.style.display = 'none';
+                    listenBtn.disabled = false;
+                    stopBtn.disabled = true;
+                };
+
+                recognition.onend = () => {
+                    console.log('Voice recognition ended.');
+                    if (currentAvatarState === 'listening') { // If it ended without a result
+                        setAvatarState('idle');
+                        listenBtn.disabled = false;
+                        stopBtn.disabled = true;
+                    }
+                };
+            }
+
+
+            // --- Text-to-Speech Function ---
+            function speak(text) {
+                if (synth.speaking) {
+                    console.warn('Speech synthesis is already speaking, queuing new utterance.');
+                }
+
+                const utterance = new SpeechSynthesisUtterance(text);
+                utterance.lang = 'en-US';
+                utterance.pitch = 1;
+                utterance.rate = 1;
+
+                utterance.onstart = () => {
+                    setAvatarState('speaking');
+                };
+
+                utterance.onend = () => {
+                    setAvatarState('idle');
+                    listenBtn.disabled = false;
+                    stopBtn.disabled = true;
+                    console.log('Speech synthesis ended.');
+                };
+
+                utterance.onerror = (event) => {
+                    console.error('Speech synthesis error:', event.error);
+                    setAvatarState('error');
+                    listenBtn.disabled = false;
+                    stopBtn.disabled = true;
+                };
+
+                synth.speak(utterance);
+            }
+
+            // --- AI Integration with Gemini API ---
+            async function processUserInputWithAI(input) {
+                let chatHistory = [];
+                chatHistory.push({ role: "user", parts: [{ text: input }] });
+                const payload = { contents: chatHistory };
+                const apiKey = ""; // Canvas will provide this at runtime if empty
+                const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
+
+                try {
+                    const response = await fetch(apiUrl, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(payload)
+                    });
+
+                    const result = await response.json();
+
+                    if (result.candidates && result.candidates.length > 0 &&
+                        result.candidates[0].content && result.candidates[0].content.parts &&
+                        result.candidates[0].content.parts.length > 0) {
+                        const aiText = result.candidates[0].content.parts[0].text;
+                        avatarReplySpan.textContent = aiText;
+                        speak(aiText);
+                    } else {
+                        console.error('Unexpected API response structure:', result);
+                        avatarReplySpan.textContent = 'I could not generate a response. Please try again.';
+                        speak(avatarReplySpan.textContent);
+                        setAvatarState('error');
+                    }
+                } catch (error) {
+                    console.error('Error calling Gemini API:', error);
+                    avatarReplySpan.textContent = 'I am having trouble connecting to my brain. Please check your internet connection or try again later.';
+                    speak(avatarReplySpan.textContent);
+                    setAvatarState('error');
+                } finally {
+                    loadingIndicator.style.display = 'none';
+                }
+            }
+
+            // Initialize 3D scene when window loads
+            window.onload = function() {
+                init3D();
+                setAvatarState('idle'); // Set initial state after 3D is ready
+            };
+        });
+    </script>
 </body>
 </html>
